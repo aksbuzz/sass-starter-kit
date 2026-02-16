@@ -1,0 +1,30 @@
+{
+  "name": "saas-starter-kit",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant SaaS starter kit — Postgres-native, Fastify, Next.js",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "db:migrate": "turbo db:migrate --filter=@saas/db",
+    "db:rollback": "turbo db:rollback --filter=@saas/db",
+    "db:status": "turbo db:status --filter=@saas/db",
+    "db:new": "turbo db:new --filter=@saas/db",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:reset": "docker compose down -v && docker compose up -d"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "prettier": "^3.2.0"
+  }
+}

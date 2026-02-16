@@ -1,0 +1,42 @@
+# Version control
+.git
+.gitignore
+
+# Node modules (Docker installs its own)
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+.next
+**/.next
+
+# Test artifacts
+coverage
+**/.nyc_output
+
+# Local env files (secrets must not be baked into images)
+.env
+.env.local
+.env.*.local
+
+# Dev tooling
+.turbo
+**/.turbo
+*.log
+**/*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# Docker files (no need inside the image)
+docker-compose*.yml
+Dockerfile*
