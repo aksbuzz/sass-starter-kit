@@ -1,0 +1,114 @@
+name: saas-starter-kit
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    build:
+      context: ./docker/postgres
+      dockerfile: Dockerfile
+    container_name: saas_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       saas_dev
+      POSTGRES_USER:     saas_admin
+      POSTGRES_PASSWORD: saas_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    command: >
+      postgres
+        -c shared_preload_libraries=pg_cron,pg_stat_statements
+        -c cron.database_name=saas_dev
+        -c max_connections=200
+        -c shared_buffers=256MB
+        -c effective_cache_size=1GB
+        -c work_mem=4MB
+        -c maintenance_work_mem=64MB
+        -c wal_buffers=16MB
+        -c checkpoint_completion_target=0.9
+        -c random_page_cost=1.1
+        -c log_min_duration_statement=1000
+        -c log_line_prefix='%t [%p] %u@%d '
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saas_admin -d saas_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Database migrations (one-shot) ─────────────────────────────────────────
+  migrate:
+    image: ghcr.io/amacneil/dbmate:2
+    container_name: saas_migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./packages/db/migrations:/db/migrations
+    environment:
+      DATABASE_URL: "postgres://saas_admin:saas_password@postgres:5432/saas_dev?sslmode=disable"
+    command: ["--no-dump-schema", "up"]
+    restart: on-failure
+
+  # ── Fastify API ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: saas_api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "3001:3001"
+    env_file: .env.docker
+    environment:
+      # Override DB URLs from .env.docker to use postgres service name
+      DATABASE_URL:     "postgresql://saas_admin:saas_password@postgres:5432/saas_dev?sslmode=disable"
+      DATABASE_APP_URL: "postgresql://app_user:app_user_password@postgres:5432/saas_dev?sslmode=disable"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Job worker ─────────────────────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: saas_worker
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "9091:9091"
+    env_file: .env.docker
+    environment:
+      DATABASE_URL:     "postgresql://saas_admin:saas_password@postgres:5432/saas_dev?sslmode=disable"
+      DATABASE_APP_URL: "postgresql://app_user:app_user_password@postgres:5432/saas_dev?sslmode=disable"
+    command: ["pnpm", "--filter", "@saas/api", "run", "worker:start"]
+
+  # ── Vite web app ───────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+      args:
+        VITE_API_URL:                http://localhost:3001
+        VITE_WEB_URL:                http://localhost:3000
+        VITE_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder
+    container_name: saas_web
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+
+
+volumes:
+  postgres_data:
+    driver: local
