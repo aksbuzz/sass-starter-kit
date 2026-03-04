@@ -1,5 +1,5 @@
 import { buildApp }  from './app.js'
-import { config }    from './config.js'
+import { config }    from '@saas/core'
 import { sql, adminSql } from '@saas/db'
 
 

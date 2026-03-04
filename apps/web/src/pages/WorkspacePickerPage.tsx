@@ -1,12 +1,10 @@
-import { SetStateAction, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { ROUTES, API_PATHS, SESSION_COOKIE_NAME } from '@saas/config'
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-  Button, Input, Label, Badge,
-} from '@saas/ui'
+import { Card, CardContent, Badge, Button, Input, Label } from '@saas/ui'
 import { api } from '@/lib/api/client'
+import { useAuth } from '@/lib/hooks/useAuth'
 import { useAuthStore } from '@/lib/store/auth.slice'
 import type { WorkspaceListItem } from '@/lib/api/types'
 import { useToast } from '@/lib/hooks/useToast'
@@ -14,10 +12,11 @@ import { useToast } from '@/lib/hooks/useToast'
 export function WorkspacePickerPage() {
   const navigate = useNavigate();
   const { toast }    = useToast()
-  const [creating, setCreating] = useState(false)
-  const [name, setName]         = useState('')
-  const [slug, setSlug]         = useState('')
-  const authStatus   = useAuthStore(s => s.status)
+  const { status: authStatus, isPlatformAdmin } = useAuth()
+
+  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [newName, setNewName]               = useState('')
+  const [newSlug, setNewSlug]               = useState('')
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') {
@@ -28,7 +27,7 @@ export function WorkspacePickerPage() {
   const { data, isLoading } = useQuery({
     queryKey:  ['workspaces'],
     queryFn:   () => api.get<{ workspaces: WorkspaceListItem[] }>(API_PATHS.tenants.list),
-    enabled:   authStatus === 'authenticated',
+    enabled:   authStatus === 'authenticated' && !isPlatformAdmin,
     retry:     1,
   })
 
@@ -37,7 +36,6 @@ export function WorkspacePickerPage() {
       api.post<{ accessToken: string }>(API_PATHS.auth.workspace, { tenantId }),
     onSuccess: (res) => {
       useAuthStore.getState().setToken(res.accessToken)
-      // Refresh indicator cookie (extends session)
       document.cookie = `${SESSION_COOKIE_NAME}=1; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax`
       navigate({ to: ROUTES.dashboard, replace: true });
     },
@@ -45,18 +43,22 @@ export function WorkspacePickerPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: () => api.post<{ tenant: { id: string } }>(API_PATHS.tenants.create, { name, slug: slug || undefined }),
-    onSuccess: (res) => selectMutation.mutate(res.tenant.id),
-    onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : 'Could not create workspace'
-      toast({ title: 'Error', description: msg, variant: 'destructive' })
+    mutationFn: async (data: { name: string; slug?: string }) => {
+      const created  = await api.post<{ tenant: { id: string } }>(API_PATHS.admin.tenants.create, data)
+      const selected = await api.post<{ accessToken: string }>(API_PATHS.auth.workspace, { tenantId: created.tenant.id })
+      return selected.accessToken
     },
+    onSuccess: (accessToken) => {
+      useAuthStore.getState().setToken(accessToken)
+      document.cookie = `${SESSION_COOKIE_NAME}=1; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax`
+      navigate({ to: ROUTES.dashboard, replace: true });
+    },
+    onError: () => toast({ title: 'Error', description: 'Could not create workspace', variant: 'destructive' }),
   })
 
   const workspaces   = data?.workspaces ?? []
   const autoSelected = useRef(false)
 
-  // Auto-select if there's exactly one workspace — must be in useEffect to avoid
   useEffect(() => {
     if (!isLoading && workspaces.length === 1 && !autoSelected.current) {
       autoSelected.current = true
@@ -68,6 +70,10 @@ export function WorkspacePickerPage() {
     if (role === 'owner') return <Badge variant="default">Owner</Badge>
     if (role === 'admin') return <Badge variant="secondary">Admin</Badge>
     return <Badge variant="outline">Member</Badge>
+  }
+
+  const handleCreate = () => {
+    createMutation.mutate({ name: newName, ...(newSlug ? { slug: newSlug } : {}) })
   }
 
   return (
@@ -104,44 +110,56 @@ export function WorkspacePickerPage() {
               </div>
             )}
 
-            {!creating ? (
-              <Button variant="outline" className="w-full" onClick={() => setCreating(true)}>
-                + Create a new workspace
+            {workspaces.length === 0 && !isPlatformAdmin && (
+              <p className="text-center text-sm text-muted-foreground py-4">
+                You haven't been added to any workspace yet. Contact your administrator.
+              </p>
+            )}
+
+            {isPlatformAdmin && !showCreateForm && (
+              <Button
+                className="w-full"
+                onClick={() => setShowCreateForm(true)}
+              >
+                Create a new workspace
               </Button>
-            ) : (
+            )}
+
+            {isPlatformAdmin && showCreateForm && (
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">New workspace</CardTitle>
-                  <CardDescription>Give your workspace a name and optional slug</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-1">
+                <CardContent className="p-4 space-y-4">
+                  <h2 className="font-semibold text-lg">New workspace</h2>
+                  <div className="space-y-2">
                     <Label htmlFor="ws-name">Name</Label>
                     <Input
                       id="ws-name"
+                      value={newName}
+                      onChange={e => setNewName(e.target.value)}
                       placeholder="Acme Corp"
-                      value={name}
-                      onChange={(e: { target: { value: SetStateAction<string> } }) => setName(e.target.value)}
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <Label htmlFor="ws-slug">Slug (optional)</Label>
                     <Input
                       id="ws-slug"
+                      value={newSlug}
+                      onChange={e => setNewSlug(e.target.value)}
                       placeholder="acme-corp"
-                      value={slug}
-                      onChange={(e: { target: { value: SetStateAction<string> } }) => setSlug(e.target.value)}
                     />
                   </div>
                   <div className="flex gap-2">
                     <Button
-                      className="flex-1"
-                      disabled={!name || createMutation.isPending}
-                      onClick={() => createMutation.mutate()}
+                      onClick={handleCreate}
+                      disabled={!newName.trim() || createMutation.isPending}
                     >
-                      {createMutation.isPending ? 'Creating…' : 'Create'}
+                      Create
                     </Button>
-                    <Button variant="outline" onClick={() => setCreating(false)}>Cancel</Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => { setShowCreateForm(false); setNewName(''); setNewSlug('') }}
+                    >
+                      Cancel
+                    </Button>
                   </div>
                 </CardContent>
               </Card>

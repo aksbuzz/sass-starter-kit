@@ -5,14 +5,14 @@ export class FeatureFlagsRepository {
   constructor(private readonly sql: Sql) {}
 
   // Resolution order: tenant override → plan default → global default.
-  async resolve(key: string, tenantId: string, planId: string): Promise<ResolvedFlag> {
+  async resolve(key: string, tenantId: string, planId: string | null): Promise<ResolvedFlag> {
     const rows = await this.sql<ResolvedFlag[]>`
       SELECT key, enabled, config
       FROM   feature_flags
       WHERE  key = ${key}
         AND (
               (scope_type = 'tenant' AND scope_id = ${tenantId}::uuid)
-           OR (scope_type = 'plan'   AND scope_id = ${planId}::uuid)
+           OR (scope_type = 'plan'   AND ${planId}::text IS NOT NULL AND scope_id = ${planId}::uuid)
            OR  scope_type = 'global'
             )
       ORDER BY CASE scope_type
@@ -29,7 +29,7 @@ export class FeatureFlagsRepository {
   async resolveMany(
     keys: string[],
     tenantId: string,
-    planId: string,
+    planId: string | null,
   ): Promise<Record<string, ResolvedFlag>> {
     if (keys.length === 0) return {}
 
@@ -39,7 +39,7 @@ export class FeatureFlagsRepository {
       WHERE  key = ANY(${keys})
         AND (
               (scope_type = 'tenant' AND scope_id = ${tenantId}::uuid)
-           OR (scope_type = 'plan'   AND scope_id = ${planId}::uuid)
+           OR (scope_type = 'plan'   AND ${planId}::text IS NOT NULL AND scope_id = ${planId}::uuid)
            OR  scope_type = 'global'
             )
       ORDER BY key,
@@ -87,6 +87,39 @@ export class FeatureFlagsRepository {
       SELECT * FROM feature_flags
       WHERE  scope_type = 'tenant' AND scope_id = ${tenantId}::uuid
       ORDER BY key
+    `
+  }
+
+  async listGlobal(): Promise<FeatureFlag[]> {
+    return this.sql<FeatureFlag[]>`
+      SELECT * FROM feature_flags
+      WHERE  scope_type = 'global'
+      ORDER BY key
+    `
+  }
+
+  async upsertGlobal(
+    key:     string,
+    enabled: boolean,
+    config:  Record<string, unknown> = {},
+  ): Promise<FeatureFlag> {
+    const rows = await this.sql<FeatureFlag[]>`
+      INSERT INTO feature_flags (key, scope_type, scope_id, enabled, config)
+      VALUES (
+        ${key}, 'global', NULL, ${enabled},
+        ${this.sql.json(config as unknown as Parameters<(typeof this.sql)['json']>[0])}
+      )
+      ON CONFLICT (key) WHERE scope_type = 'global'
+        DO UPDATE SET enabled = EXCLUDED.enabled, config = EXCLUDED.config, updated_at = NOW()
+      RETURNING *
+    `
+    return rows[0]!
+  }
+
+  async deleteGlobal(key: string): Promise<void> {
+    await this.sql`
+      DELETE FROM feature_flags
+      WHERE  key = ${key} AND scope_type = 'global'
     `
   }
 }

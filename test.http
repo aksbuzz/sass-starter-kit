@@ -1,0 +1,627 @@
+# SaaS Starter Kit — API Test File
+# Works with VS Code REST Client extension and JetBrains HTTP Client
+#
+# QUICK START
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Start services: pnpm docker:up
+# 2. Run migrations: pnpm db:migrate
+# 3. Start API + Admin: cd apps/api && pnpm dev   (then: cd apps/admin && pnpm dev)
+# 4. Get a dev token (step 2 below) and copy it into @accessToken
+# 5. Select a workspace (step 3) and copy the result into @wsToken
+#
+# FLOW
+#   dev-token → (pick tenant from GET /tenants) → POST /auth/workspace → use wsToken
+# ─────────────────────────────────────────────────────────────────────────────
+
+@baseUrl    = http://localhost:3001
+@adminUrl   = http://localhost:3002
+
+# Paste tokens here after running the auth steps below
+@accessToken = REPLACE_WITH_ACCESS_TOKEN
+@wsToken     = REPLACE_WITH_WORKSPACE_TOKEN
+
+# IDs to fill in after creation
+@tenantId      = REPLACE_WITH_TENANT_ID
+@membershipId  = REPLACE_WITH_MEMBERSHIP_ID
+@invitationId  = REPLACE_WITH_INVITATION_ID
+@inviteToken   = REPLACE_WITH_INVITE_TOKEN
+@apiKeyId      = REPLACE_WITH_API_KEY_ID
+@webhookId     = REPLACE_WITH_WEBHOOK_ID
+@platformAdmin = REPLACE_WITH_PLATFORM_ADMIN_TOKEN
+
+
+###############################################################################
+# 1. HEALTH
+###############################################################################
+
+### API health check (port 3001)
+GET {{baseUrl}}/health
+
+###
+
+### Admin health check (port 3002)
+GET {{adminUrl}}/health
+
+
+###############################################################################
+# 2. AUTH — DEV SHORTCUTS (development only, not available in production)
+###############################################################################
+
+### [DEV] Issue tokens for any email without OAuth
+# Use this to bootstrap. Copy the returned accessToken into @accessToken above.
+# @name devToken
+POST {{baseUrl}}/auth/dev-token
+Content-Type: application/json
+
+{
+  "email": "dev@example.com",
+  "name": "Dev User"
+}
+
+---
+
+### [DEV] Issue a platform-admin token
+# Use isPlatformAdmin:true in the user record by first creating one via admin panel,
+# or seed it directly. For now, use a known platform admin email.
+POST {{baseUrl}}/auth/dev-token
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "name": "Platform Admin"
+}
+
+
+###############################################################################
+# 3. AUTH — SELECT WORKSPACE
+# After getting an accessToken, list workspaces then pick one.
+###############################################################################
+
+### List workspaces for the current user (uses bare access token, no tenant yet)
+GET {{baseUrl}}/tenants
+Authorization: Bearer {{accessToken}}
+
+---
+
+### Select (activate) a workspace — copy the returned accessToken into @wsToken
+# @name selectWorkspace
+POST {{baseUrl}}/auth/workspace
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "tenantId": "{{tenantId}}"
+}
+
+
+###############################################################################
+# 4. AUTH — TOKEN LIFECYCLE
+###############################################################################
+
+### Refresh access token (sends refresh_token cookie automatically in HTTP Client)
+POST {{baseUrl}}/auth/refresh
+
+---
+
+### Exchange one-time auth code for tokens (called by web app after OAuth redirect)
+POST {{baseUrl}}/auth/exchange
+Content-Type: application/json
+
+{
+  "code": "REPLACE_WITH_ONE_TIME_CODE"
+}
+
+---
+
+### Logout — invalidates current session
+DELETE {{baseUrl}}/auth/logout
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 5. AUTH — IMPERSONATION (workspace owners only)
+###############################################################################
+
+### Start impersonating a workspace member
+POST {{baseUrl}}/auth/impersonate
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "targetUserId": "REPLACE_WITH_TARGET_USER_ID",
+  "tenantId": "{{tenantId}}"
+}
+
+---
+
+### Stop impersonation and return to original session
+POST {{baseUrl}}/auth/stop-impersonation
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 6. TENANTS / WORKSPACES
+###############################################################################
+
+### List all workspaces the current user belongs to
+GET {{baseUrl}}/tenants
+Authorization: Bearer {{accessToken}}
+
+---
+
+### Get current workspace context (tenant, subscription, flags, membership)
+GET {{baseUrl}}/tenants/me
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Update workspace name or settings (owner/admin only)
+PATCH {{baseUrl}}/tenants/me
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "name": "My Updated Workspace"
+}
+
+---
+
+### Soft-delete workspace (owner only) — DANGEROUS
+DELETE {{baseUrl}}/tenants/me
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 7. TEAM — MEMBERS
+###############################################################################
+
+### List workspace members
+GET {{baseUrl}}/tenants/me/members
+Authorization: Bearer {{wsToken}}
+
+---
+
+### List workspace members — paginated
+GET {{baseUrl}}/tenants/me/members?limit=10&offset=0
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Invite a member to the workspace (owner/admin only)
+# @name inviteMember
+POST {{baseUrl}}/tenants/me/members/invite
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "email": "newmember@example.com",
+  "role": "member"
+}
+
+---
+
+### Invite an admin to the workspace
+POST {{baseUrl}}/tenants/me/members/invite
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "email": "newadmin@example.com",
+  "role": "admin"
+}
+
+---
+
+### Change a member's role (owner only)
+PATCH {{baseUrl}}/tenants/me/members/{{membershipId}}/role
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "role": "admin"
+}
+
+---
+
+### Remove a member from the workspace (owner only)
+DELETE {{baseUrl}}/tenants/me/members/{{membershipId}}
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 8. TEAM — INVITATIONS
+###############################################################################
+
+### List pending invitations (owner/admin only)
+GET {{baseUrl}}/tenants/me/invitations
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Cancel a pending invitation (owner/admin only)
+DELETE {{baseUrl}}/tenants/me/invitations/{{invitationId}}
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Get invitation details by token (public — no auth required)
+GET {{baseUrl}}/invitations/{{inviteToken}}
+
+---
+
+### Accept a workspace invitation (must be authenticated)
+POST {{baseUrl}}/invitations/{{inviteToken}}/accept
+Authorization: Bearer {{accessToken}}
+
+
+###############################################################################
+# 9. BILLING
+###############################################################################
+
+### List all public plans (no auth required — for pricing page)
+GET {{baseUrl}}/billing/plans
+
+---
+
+### Get current workspace subscription
+GET {{baseUrl}}/billing/subscription
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Create a Stripe Checkout session for a plan upgrade (owner/admin only)
+POST {{baseUrl}}/billing/checkout
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "planSlug": "growth",
+  "billingCycle": "monthly"
+}
+
+---
+
+### Create a Stripe Billing Portal session (owner/admin only)
+POST {{baseUrl}}/billing/portal
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 10. API KEYS
+###############################################################################
+
+### List API keys for the current workspace
+GET {{baseUrl}}/api-keys
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Create a new API key (owner/admin only)
+# fullKey is returned ONCE — save it immediately
+# @name createApiKey
+POST {{baseUrl}}/api-keys
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "name": "My Integration Key",
+  "scopes": ["read:data", "write:data"]
+}
+
+---
+
+### Create an API key with expiry
+POST {{baseUrl}}/api-keys
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "name": "Short-lived Key",
+  "scopes": ["read:data"],
+  "expiresAt": "2027-01-01T00:00:00Z"
+}
+
+---
+
+### Revoke an API key (owner/admin only)
+DELETE {{baseUrl}}/api-keys/{{apiKeyId}}
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 11. AUDIT LOGS
+###############################################################################
+
+### List audit logs (owner/admin only)
+GET {{baseUrl}}/audit-logs
+Authorization: Bearer {{wsToken}}
+
+---
+
+### List audit logs — with filters
+GET {{baseUrl}}/audit-logs?limit=25&offset=0&action=api_keys.create
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Filter by resource type
+GET {{baseUrl}}/audit-logs?resourceType=ApiKey&limit=50
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Filter by date range
+GET {{baseUrl}}/audit-logs?from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z&limit=100
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Filter by user
+GET {{baseUrl}}/audit-logs?userId=REPLACE_WITH_USER_ID&limit=20
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 12. FEATURE FLAGS
+###############################################################################
+
+### List tenant-level flag overrides (owner/admin only)
+GET {{baseUrl}}/feature-flags
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Resolve flags for the current workspace (any member)
+GET {{baseUrl}}/feature-flags/resolve?keys=new_dashboard,billing_v2,advanced_analytics
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Set a tenant-level flag override (owner/admin only)
+PUT {{baseUrl}}/feature-flags/new_dashboard
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "config": {
+    "variant": "v2"
+  }
+}
+
+---
+
+### Disable a feature flag for this tenant
+PUT {{baseUrl}}/feature-flags/beta_feature
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "enabled": false
+}
+
+---
+
+### Remove a tenant-level flag override (reverts to platform default)
+DELETE {{baseUrl}}/feature-flags/new_dashboard
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 13. WEBHOOKS
+###############################################################################
+
+### List webhook endpoints
+GET {{baseUrl}}/webhooks
+Authorization: Bearer {{wsToken}}
+
+---
+
+### Create a webhook endpoint (owner/admin only)
+# Secret is returned ONCE — save it for HMAC verification
+# @name createWebhook
+POST {{baseUrl}}/webhooks
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "url": "https://example.com/webhooks/saas",
+  "events": ["member.invited", "member.removed", "subscription.upgraded"]
+}
+
+---
+
+### Create a webhook subscribed to ALL events (empty events array)
+POST {{baseUrl}}/webhooks
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "url": "https://example.com/webhooks/all",
+  "events": []
+}
+
+---
+
+### Update a webhook endpoint (owner/admin only)
+PATCH {{baseUrl}}/webhooks/{{webhookId}}
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "isActive": false
+}
+
+---
+
+### Update webhook URL and events
+PATCH {{baseUrl}}/webhooks/{{webhookId}}
+Authorization: Bearer {{wsToken}}
+Content-Type: application/json
+
+{
+  "url": "https://example.com/webhooks/v2",
+  "events": ["member.invited"],
+  "isActive": true
+}
+
+---
+
+### Delete a webhook endpoint (owner/admin only)
+DELETE {{baseUrl}}/webhooks/{{webhookId}}
+Authorization: Bearer {{wsToken}}
+
+---
+
+### List delivery attempts for a webhook endpoint (last 25)
+GET {{baseUrl}}/webhooks/{{webhookId}}/deliveries
+Authorization: Bearer {{wsToken}}
+
+---
+
+### List delivery attempts — custom limit
+GET {{baseUrl}}/webhooks/{{webhookId}}/deliveries?limit=50
+Authorization: Bearer {{wsToken}}
+
+
+###############################################################################
+# 14. ADMIN — CONTROL PLANE (platform admins only)
+# Use @platformAdmin token for all requests in this section
+###############################################################################
+
+### Platform stats — tenant count, user count, revenue
+GET {{adminUrl}}/admin/stats
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### List all tenants (paginated)
+GET {{adminUrl}}/admin/tenants
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### List tenants — filtered and paginated
+GET {{adminUrl}}/admin/tenants?limit=20&offset=0&status=active&search=acme
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### Create a new tenant
+# @name adminCreateTenant
+POST {{adminUrl}}/admin/tenants
+Authorization: Bearer {{platformAdmin}}
+Content-Type: application/json
+
+{
+  "name": "Acme Corp",
+  "slug": "acme-corp"
+}
+
+---
+
+### Create tenant with owner email and plan
+POST {{adminUrl}}/admin/tenants
+Authorization: Bearer {{platformAdmin}}
+Content-Type: application/json
+
+{
+  "name": "Enterprise Co",
+  "slug": "enterprise-co",
+  "ownerEmail": "owner@enterprise.com",
+  "planId": "REPLACE_WITH_PLAN_ID"
+}
+
+---
+
+### Get a specific tenant's detail
+GET {{adminUrl}}/admin/tenants/{{tenantId}}
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### Update tenant name
+PATCH {{adminUrl}}/admin/tenants/{{tenantId}}
+Authorization: Bearer {{platformAdmin}}
+Content-Type: application/json
+
+{
+  "name": "Acme Corp (Renamed)"
+}
+
+---
+
+### Suspend a tenant
+PATCH {{adminUrl}}/admin/tenants/{{tenantId}}
+Authorization: Bearer {{platformAdmin}}
+Content-Type: application/json
+
+{
+  "status": "suspended"
+}
+
+---
+
+### Reactivate a tenant
+PATCH {{adminUrl}}/admin/tenants/{{tenantId}}
+Authorization: Bearer {{platformAdmin}}
+Content-Type: application/json
+
+{
+  "status": "active"
+}
+
+---
+
+### Soft-delete a tenant — DANGEROUS
+DELETE {{adminUrl}}/admin/tenants/{{tenantId}}
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### List all users (paginated)
+GET {{adminUrl}}/admin/users
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### List users — search and paginate
+GET {{adminUrl}}/admin/users?limit=20&offset=0&search=example.com
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### List platform-level feature flag defaults
+GET {{adminUrl}}/admin/feature-flags
+Authorization: Bearer {{platformAdmin}}
+
+---
+
+### Set a platform-level feature flag default
+PUT {{adminUrl}}/admin/feature-flags/new_dashboard
+Authorization: Bearer {{platformAdmin}}
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "config": {
+    "rollout": 100
+  }
+}
+
+---
+
+### Disable a platform feature flag for everyone by default
+PUT {{adminUrl}}/admin/feature-flags/beta_feature
+Authorization: Bearer {{platformAdmin}}
+Content-Type: application/json
+
+{
+  "enabled": false
+}
+
+---
+
+### Delete a platform-level feature flag default
+DELETE {{adminUrl}}/admin/feature-flags/new_dashboard
+Authorization: Bearer {{platformAdmin}}

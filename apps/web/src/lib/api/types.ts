@@ -5,6 +5,7 @@ export interface AccessTokenPayload {
   sid: string        // sessionId
   tid: string | null // tenantId (null before workspace selection)
   role: 'owner' | 'admin' | 'member' | null
+  ipa?: boolean      // isPlatformAdmin — present when true
   imp?: string       // impersonator userId — present only during impersonation
   exp: number
   iat: number

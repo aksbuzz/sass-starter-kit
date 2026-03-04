@@ -65,9 +65,8 @@ test.describe('Route protection (unauthenticated)', () => {
     await expect(page).toHaveURL(/\/login/)
   })
 
-  test('/workspace-picker is accessible without session', async ({ page }) => {
+  test('/workspace-picker redirects to /login without session', async ({ page }) => {
     await page.goto('/workspace-picker')
-    await expect(page).not.toHaveURL(/\/login/)
-    await expect(page.getByText('Choose a workspace')).toBeVisible()
+    await expect(page).toHaveURL(/\/login/)
   })
 })

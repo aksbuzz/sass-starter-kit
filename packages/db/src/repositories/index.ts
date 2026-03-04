@@ -1,5 +1,7 @@
 export { TenantsRepository }      from './tenants.js'
+export type { TenantAdminRow }    from './tenants.js'
 export { UsersRepository }        from './users.js'
+export type { UserAdminRow }      from './users.js'
 export { OAuthAccountsRepository } from './oauth-accounts.js'
 export { MembershipsRepository }  from './memberships.js'
 export { PlansRepository }        from './plans.js'

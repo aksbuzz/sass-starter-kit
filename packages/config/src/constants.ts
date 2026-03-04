@@ -11,6 +11,10 @@ export const ROUTES = {
   webhooks:        '/webhooks',
   auditLog:        '/audit-log',
   featureFlags:    '/feature-flags',
+  // Control plane (platform admin)
+  adminTenants:    '/admin/tenants',
+  adminUsers:      '/admin/users',
+  adminFlags:      '/admin/feature-flags',
 } as const
 
 // ── API path constants ─────────────────────────────────────────────────────────
@@ -27,7 +31,6 @@ export const API_PATHS = {
   },
   tenants: {
     list:        '/tenants',
-    create:      '/tenants',
     me:          '/tenants/me',
     members:     '/tenants/me/members',
     invitations: '/tenants/me/invitations',
@@ -62,6 +65,25 @@ export const API_PATHS = {
     delete:  (key: string) => `/feature-flags/${key}`,
   },
   health: '/health',
+  // Control plane (platform admin)
+  admin: {
+    stats:        '/admin/stats',
+    tenants: {
+      list:   '/admin/tenants',
+      create: '/admin/tenants',
+      get:    (id: string) => `/admin/tenants/${id}`,
+      update: (id: string) => `/admin/tenants/${id}`,
+      delete: (id: string) => `/admin/tenants/${id}`,
+    },
+    users: {
+      list: '/admin/users',
+    },
+    featureFlags: {
+      list:   '/admin/feature-flags',
+      upsert: (key: string) => `/admin/feature-flags/${key}`,
+      delete: (key: string) => `/admin/feature-flags/${key}`,
+    },
+  },
 } as const
 
 // ── Plan slugs ────────────────────────────────────────────────────────────────

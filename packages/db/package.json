@@ -12,11 +12,11 @@
     }
   },
   "scripts": {
-    "db:migrate": "dbmate --url \"$DATABASE_URL\" --migrations-dir ./migrations --schema-file ./schema.sql up",
-    "db:rollback": "dbmate --url \"$DATABASE_URL\" --migrations-dir ./migrations --schema-file ./schema.sql down",
-    "db:status": "dbmate --url \"$DATABASE_URL\" --migrations-dir ./migrations status",
-    "db:new": "dbmate --url \"$DATABASE_URL\" --migrations-dir ./migrations new",
-    "db:dump": "dbmate --url \"$DATABASE_URL\" --schema-file ./schema.sql dump",
+    "db:migrate": "dbmate --migrations-dir ./migrations --schema-file ./schema.sql up",
+    "db:rollback": "dbmate --migrations-dir ./migrations --schema-file ./schema.sql down",
+    "db:status": "dbmate --migrations-dir ./migrations status",
+    "db:new": "dbmate --migrations-dir ./migrations new",
+    "db:dump": "dbmate --schema-file ./schema.sql dump",
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit"
   },

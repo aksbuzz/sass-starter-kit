@@ -1,6 +1,6 @@
 # SaaS Starter Kit
 
-A production-ready starter for building multi-tenant SaaS products. It includes authentication, billing, team management, background jobs, webhooks, and API keys — all wired together and ready to extend.
+A production-ready monorepo for building multi-tenant SaaS products. Includes authentication, billing, team management, background jobs, webhooks, API keys, audit logs, and a platform admin control plane — all wired together and ready to extend.
 
 ## What is included
 
@@ -12,18 +12,21 @@ A production-ready starter for building multi-tenant SaaS products. It includes 
 - **Background jobs** — poll-based queue backed by PostgreSQL (no Redis needed)
 - **Audit logs** — every write recorded with before/after state, impersonation metadata included
 - **Feature flags** — per-tenant and per-plan flag overrides
-- **Platform admin impersonation** — support staff can start a full session as any user, with audit trail and visual indicator
+- **Platform admin** — control plane for managing all tenants and users; impersonation with 2-hour TTL and full audit trail
 
 ## Tech stack
 
 | Layer | Technology |
 |-------|-----------|
 | API server | [Fastify](https://fastify.dev) |
+| Frontend | React 18, Vite, TanStack Router, Redux Toolkit |
 | Language | TypeScript (strict mode) |
-| Database | PostgreSQL (RLS, advisory locks, LISTEN/NOTIFY) |
+| Database | PostgreSQL (RLS, advisory locks) |
 | Dependency injection | Inversify |
 | Logging | Pino |
-| Testing | Vitest |
+| Unit tests | Vitest |
+| E2E tests (API) | Cucumber / BDD |
+| E2E tests (web) | Playwright |
 | Package manager | pnpm (monorepo) |
 | Build | Turborepo |
 
@@ -32,30 +35,62 @@ A production-ready starter for building multi-tenant SaaS products. It includes 
 ```
 sass-starter-kit/
 ├── apps/
-│   ├── api/          — Fastify REST API server
-│   └── web/          — Next.js frontend (coming next)
+│   ├── api/          — Fastify REST API + background job worker
+│   └── web/          — React frontend (admin control plane + tenant app)
 ├── packages/
-│   ├── db/           — DB client, migrations, repositories, types
-│   └── config/       — Shared environment variable schema (Zod)
+│   ├── db/           — DB client, migrations, repositories, domain types
+│   ├── ui/           — Shared UI component library (shadcn/ui)
+│   └── config/       — Shared constants (ROUTES, API_PATHS, cookie names)
+├── docs/
+│   ├── architecture.md   — Request lifecycle, RLS, auth, module system
+│   ├── deployment.md     — Docker, env vars, production checklist
+│   └── adr/              — Architecture Decision Records
 ├── .env.example      — All required environment variables
 └── pnpm-workspace.yaml
 ```
 
-Inside `apps/api/src/`:
+### API layer (`apps/api/src/`)
+
+The API is organised into three logical layers — everything runs in a single process:
 
 ```
-app.ts            — Fastify instance setup
-main.ts           — Process entry point, graceful shutdown
-config.ts         — Validated env vars (Zod schema)
-container/        — Inversify DI container and token registry
-hooks/            — authenticate, requireRole, requirePlatformAdmin preHandlers
-plugins/          — Helmet, CORS, JWT, rate limiting, Swagger
-routes/           — One folder per domain (auth, tenants, billing, ...)
-services/         — Business logic layer (one class per domain)
-worker/           — Background job workers and handlers
-lib/              — Small utilities (email, OAuth, crypto, audit-helpers)
-tests/            — Unit tests
+core/                ← always-on auth and tenant infrastructure
+  auth/              ← OAuth, token exchange, session rotation, impersonation
+  tenant/            ← workspace CRUD, workspace selection, context loading
+  hooks/             ← authenticate, requireRole, requirePlatformAdmin preHandlers
+  container.ts       ← buildCoreContainer() — DI bindings for core services
+  types.ts           ← RequestContext and shared types
+
+control-plane/       ← platform-admin-only operations (guarded by requirePlatformAdmin)
+  routes.ts          ← /admin/* routes
+  service.ts         ← AdminService — tenant provisioning, user management, platform flags
+  container.ts       ← registerControlPlane(container)
+
+modules/             ← opt-in feature modules; toggle by editing registry.ts
+  registry.ts        ← enabledModules[] — comment out to disable a module
+  team/              ← member invitations, role changes
+  billing/           ← Stripe subscriptions, checkout, billing portal
+  api-keys/          ← HMAC key issuance and revocation
+  webhooks/          ← outbound HTTP delivery endpoints
+  feature-flags/     ← per-tenant flag overrides
+  audit-logs/        ← audit log query and archival
+
+worker/              ← background job worker (separate process)
+  handlers/          ← one handler per job type
 ```
+
+### Web layer (`apps/web/src/`)
+
+Mirrors the API's layered structure:
+
+```
+core/                ← auth flow, workspace picker, dashboard shell
+modules/             ← one folder per feature module (pages + nav items)
+  registry.ts        ← enabledModules[] — comment out to disable a module
+control-plane/       ← platform admin pages (tenant list, user management)
+```
+
+The router and sidebar read from `modules/registry.ts` at startup, so disabling a module removes its routes and nav entry automatically.
 
 ## Prerequisites
 
@@ -79,115 +114,101 @@ pnpm install
 cp .env.example .env
 ```
 
-Then fill in the values. The minimum required to start:
+Minimum required values:
 
-- `DATABASE_URL` and `DATABASE_APP_URL` — two Postgres connection strings (admin role and app role)
-- `JWT_SECRET` — any long random string
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` or GitHub equivalents
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Admin Postgres connection (migrations, cross-tenant ops) |
+| `DATABASE_APP_URL` | App-user Postgres connection (RLS-enforced queries) |
+| `JWT_SECRET` | Any long random string (≥ 32 chars) |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | OAuth credentials (or GitHub equivalents) |
+| `STRIPE_SECRET_KEY` | Stripe key (test mode for development) |
+| `ENCRYPTION_KEY` | 64-char hex key for encrypting stored secrets |
 
 **3. Set up the database**
 
-Run migrations to create all tables, RLS policies, and seed data:
-
 ```bash
 cd packages/db
-pnpm db:migrate   # runs dbmate migrations in db/migrations/
+pnpm db:migrate   # runs dbmate migrations
 pnpm db:seed      # inserts starter plan and default feature flags
 ```
 
-**4. Start the API server**
+**4. Start everything**
 
 ```bash
-# from repo root
+# from repo root — starts API + web in watch mode via Turborepo
 pnpm dev
 ```
 
-This runs all packages in watch mode via Turborepo. The API listens on `http://localhost:3001` by default.
+API listens on `http://localhost:3001`, web on `http://localhost:3000`.
 
-**5. Start the job worker (optional, separate process)**
+**5. Start the job worker (separate process)**
 
 ```bash
 cd apps/api
 pnpm worker:dev
 ```
 
-## Environment variables
-
-See `.env.example` for all variables with descriptions. Key groups:
-
-| Group | Variables |
-|-------|-----------|
-| Database | `DATABASE_URL`, `DATABASE_APP_URL`, pool settings |
-| Auth | `JWT_SECRET`, `GOOGLE_*`, `GITHUB_*` |
-| Stripe | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
-| Email (optional) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` |
-| App | `NODE_ENV`, `API_PORT`, `WEB_URL`, `API_URL` |
-
-If `SMTP_HOST` is not set, invitation emails are printed to stdout instead of sent. This is useful for development.
-
 ## Running tests
 
 ```bash
-cd apps/api
-pnpm test          # run all tests once
-pnpm test:watch    # watch mode
+# Unit tests (no database required)
+cd apps/api && pnpm test
+
+# API E2E tests (requires running database)
+cd apps/api && pnpm test:e2e
+
+# Web E2E tests (requires running API + web servers)
+cd apps/web && pnpm test:e2e
 ```
 
-Tests use Vitest with mocked repositories — no database connection required.
+## Adding a new module
 
-## API documentation
-
-When `NODE_ENV` is not `production`, Swagger UI is available at:
+Create a folder in `apps/api/src/modules/<your-module>/`:
 
 ```
-http://localhost:3001/docs
+your-module/
+  service.ts     ← business logic
+  routes.ts      ← FastifyPluginAsync with your endpoints
+  container.ts   ← export registerYourModule(container: Container)
+  index.ts       ← export yourModule satisfies ApiModule
 ```
 
-## Database
+Then add `yourModule` to `apps/api/src/modules/registry.ts` and the corresponding `WebModule` to `apps/web/src/modules/registry.ts`.
 
-The `packages/db` package exports everything the API needs:
+## Disabling a module
 
-- `withTenant(opts, fn)` — runs `fn` inside a transaction with RLS tenant context set
-- `withAdmin(fn)` — runs `fn` with the admin connection (bypasses RLS)
-- All repository classes (`TenantsRepository`, `MembershipsRepository`, etc.)
-- Domain error classes (`NotFoundError`, `ConflictError`, `ForbiddenError`, `PlanLimitError`)
+Comment out the module in both registry files:
 
-See `packages/db/README.md` for migration and schema details.
+```typescript
+// apps/api/src/modules/registry.ts
+export const enabledModules: ApiModule[] = [
+  teamModule,
+  // billingModule,   ← disabled
+  apiKeysModule,
+]
+```
+
+The module's routes return 404 and its nav entry disappears from the sidebar automatically.
 
 ## Key concepts
 
 **Multi-tenancy with RLS**
-Each database query runs as `app_user`. Before each query, we set `app.current_tenant_id` so PostgreSQL RLS policies automatically filter rows. No manual `WHERE tenant_id = ?` needed.
+Each query runs as `app_user`. Before each query, `withTenant()` sets `app.current_tenant_id` so PostgreSQL RLS policies automatically filter rows.
 
-**Authentication flow**
-1. User completes OAuth → we create/update the user and session
-2. We issue a short-lived access token (15 min) and a long-lived refresh token in an httpOnly cookie
-3. On workspace selection (`POST /auth/workspace`), we patch the session and issue a new access token with `tenantId` and `role` inside
-4. The `authenticate` hook reads `role` from the session record in the DB (not from the JWT), so role changes take effect immediately
+**Two-phase authentication**
+1. OAuth → `POST /auth/exchange` → access token (no workspace yet)
+2. Workspace selection → `POST /auth/workspace` → new token with `tenantId + role`
 
-**Background jobs**
-Jobs are rows in the `jobs` table. Workers claim them with `SELECT ... FOR UPDATE SKIP LOCKED` so multiple workers never pick the same job. Failed jobs are retried by a pg_cron job using exponential backoff. No Redis or external queue required.
-
-**Webhooks**
-Outbound webhook delivery is a job in the `webhook` queue. The payload is signed with `HMAC-SHA256(secret, "{timestamp}.{body}")` so receivers can verify authenticity.
-
-**Platform admin impersonation**
-Users with `is_platform_admin = TRUE` in the database can start a session as any non-admin user via `POST /auth/impersonate`. The impersonation session is time-boxed to 2 hours, the admin's original session is preserved, and every action taken during impersonation records `impersonatedBy` in the audit log. The frontend shows a persistent amber banner while impersonation is active. Stop with `POST /auth/stop-impersonation`, which returns tokens for the original admin session. The flag is set directly in the database — there is no API to grant it.
+**Platform admin**
+Users with `is_platform_admin = TRUE` access `/admin/*` routes. The flag can only be set by a direct database write — no API surface to prevent privilege escalation.
 
 ```sql
 UPDATE users SET is_platform_admin = TRUE WHERE email = 'support@yourcompany.com';
 ```
 
-## Adding a new domain
-
-1. Add a migration in `packages/db/db/migrations/`
-2. Add a repository in `packages/db/src/repositories/`
-3. Export from `packages/db/src/repositories/index.ts`
-4. Add types to `packages/db/src/types.ts`
-5. Create a service in `apps/api/src/services/`
-6. Bind the service in `apps/api/src/container/index.ts`
-7. Create routes in `apps/api/src/routes/<domain>/index.ts`
-8. Register the routes in `apps/api/src/routes/index.ts`
+**Background jobs**
+Jobs are rows in the `jobs` table. Workers claim them with `SELECT ... FOR UPDATE SKIP LOCKED`. No Redis or external queue needed.
 
 ## License
 

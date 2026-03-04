@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { ROUTES, API_PATHS, SESSION_COOKIE_NAME } from '@saas/config'
-import { useAuthStore } from '@/lib/store/auth.slice'
+import { useAuthStore, decodeToken } from '@/lib/store/auth.slice'
 import { api } from '@/lib/api/client'
 
 export function AuthCallbackPage() {
@@ -21,7 +21,8 @@ export function AuthCallbackPage() {
       .then(res => {
         useAuthStore.getState().setToken(res.accessToken);
         document.cookie = `${SESSION_COOKIE_NAME}=1; path=/; max-age=${7 * 24 * 60 * 60}; samesite=lax`;
-        navigate({ to: ROUTES.workspacePicker, replace: true });
+        const payload = decodeToken(res.accessToken);
+        navigate({ to: (payload?.ipa ? ROUTES.adminTenants : ROUTES.workspacePicker) as string, replace: true });
       })
       .catch(() => navigate({ to: ROUTES.login, replace: true }));
   }, [navigate]);

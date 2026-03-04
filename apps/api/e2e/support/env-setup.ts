@@ -1,6 +1,24 @@
 import path from 'node:path'
 import fs   from 'node:fs'
 
+// Patch tsx's fileMatcher so cross-package files (packages/core) get decorator
+// support.  tsx resolves tsconfig from CWD and only applies compilerOptions to
+// files matching the tsconfig "include" glob.  Files in packages/core/ fall
+// outside apps/api/tsconfig.json's include, so esbuild rejects @inject decorators.
+for (const [, mod] of Object.entries(require.cache)) {
+  if (mod?.exports && typeof mod.exports.fileMatcher === 'function') {
+    const original = mod.exports.fileMatcher
+    mod.exports.fileMatcher = (filePath: string) => {
+      const result = original(filePath)
+      if (result) return result
+      if (filePath.endsWith('.ts') || filePath.endsWith('.tsx')) {
+        return { experimentalDecorators: true, emitDecoratorMetadata: true }
+      }
+    }
+    break
+  }
+}
+
 // Try to load .env from the repo root
 const repoRoot = path.resolve(__dirname, '..', '..', '..', '..')
 const envFile  = path.join(repoRoot, '.env')
@@ -14,8 +32,8 @@ if (fs.existsSync(envFile)) {
     if (eq === -1) continue
     const key   = trimmed.slice(0, eq).trim()
     const value = trimmed.slice(eq + 1).trim()
-    // Only set if not already provided by the environment
-    if (!(key in process.env)) {
+    // Only set if not already provided by the environment (skip empty values so defaults can apply)
+    if (!(key in process.env) || process.env[key] === '') {
       process.env[key] = value
     }
   }
@@ -24,8 +42,8 @@ if (fs.existsSync(envFile)) {
 // Test-safe defaults for external services not exercised by these e2e tests.
 const DEFAULTS: Record<string, string> = {
   NODE_ENV:               'test',
-  DATABASE_URL:           'postgresql://saas_admin:password@localhost:5432/saas_test',
-  DATABASE_APP_URL:       'postgresql://app_user:password@localhost:5432/saas_test',
+  DATABASE_URL:           'postgresql://saas_admin:saas_password@localhost:5432/saas_dev?sslmode=disable',
+  DATABASE_APP_URL:       'postgresql://app_user:app_user_password@localhost:5432/saas_dev?sslmode=disable',
   JWT_SECRET:             'e2e-test-secret-min-32-chars-long-enough',
   GOOGLE_CLIENT_ID:       'test-google-client-id',
   GOOGLE_CLIENT_SECRET:   'test-google-client-secret',
@@ -40,7 +58,7 @@ const DEFAULTS: Record<string, string> = {
 }
 
 for (const [key, value] of Object.entries(DEFAULTS)) {
-  if (!(key in process.env)) {
+  if (!(key in process.env) || !process.env[key]) {
     process.env[key] = value
   }
 }

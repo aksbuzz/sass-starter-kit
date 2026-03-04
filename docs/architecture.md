@@ -17,7 +17,7 @@ authenticate hook  ──→  validates JWT + checks session in DB
   │                       impersonatorId  (set only during impersonation)
   ▼
 requireRole hook          ──→  checks ctx.role against minimum required role
-requirePlatformAdmin hook ──→  checks users.is_platform_admin (impersonate route only)
+requirePlatformAdmin hook ──→  checks ctx.isPlatformAdmin (from JWT ipa claim)
   │
   ▼
 Route handler
@@ -100,6 +100,34 @@ POST /auth/stop-impersonation
 
 The `authenticate` hook reads `role` from `session.data` (the database record), not from the JWT claim. This means if someone's role changes, their next request will see the new role immediately after token refresh. It also reads `impersonatorId` from `session.data` and exposes it on `ctx.impersonatorId` — services use this to tag audit log entries with `impersonatedBy`.
 
+## Control plane vs app plane
+
+The API is split into two planes:
+
+| Plane | Routes | Guard |
+|-------|--------|-------|
+| **Control plane** | `/admin/*` | `requirePlatformAdmin` — JWT must carry `ipa: true` |
+| **App plane (core)** | `/auth/*`, `/tenants/*` | `authenticate` — always available |
+| **App plane (modules)** | `/tenants/me/members`, `/billing/*`, etc. | `requireRole` — tenant context required |
+
+Control plane operations (tenant provisioning, user management, platform feature flags) are only accessible to platform admins. Tenant creation has moved entirely to `POST /admin/tenants` — regular users cannot self-provision workspaces. Non-admin users with no workspaces see an empty-state message instead.
+
+The `ipa` (isPlatformAdmin) claim is baked into the access token at login time from `users.is_platform_admin`. It is preserved across token refreshes and workspace selection but is always set to `false` for impersonation sessions.
+
+### Web module system
+
+The frontend mirrors the API's layered structure. Each feature module exports a `WebModule`:
+
+```typescript
+export interface WebModule {
+  name:     string
+  routes:   RouteConfig[]   // { path, component } — registered in router.tsx
+  navItems: NavItem[]       // { href, label, icon } — rendered in Sidebar.tsx
+}
+```
+
+`apps/web/src/modules/registry.ts` holds the list of enabled web modules. The router and sidebar read from this registry at startup, so toggling a module removes its page routes and nav entry automatically.
+
 ## Platform admin impersonation
 
 Platform admins are identified by `users.is_platform_admin = TRUE`. This flag has no API surface — it can only be set with a direct database write. This prevents privilege escalation through any API vulnerability.
@@ -114,9 +142,79 @@ Impersonation security invariants:
 - Every write action during impersonation carries `metadata.impersonatedBy` in the audit log
 - The JWT carries an `imp` claim (impersonator user ID) so the frontend can show the banner without an extra API call
 
+## Layered module system
+
+The codebase is split into three logical layers. All layers live in the same process and the same deployable — the separation is organisational, not infrastructural.
+
+```
+apps/api/src/
+  core/                ← always on; auth + tenant context
+    auth/              ← OAuth, JWT, sessions, token exchange
+    tenant/            ← workspace CRUD, workspace selection, context
+    hooks/             ← authenticate, requireRole, requirePlatformAdmin
+    container.ts       ← buildCoreContainer() — DI bindings for core services
+    types.ts           ← RequestContext and shared types
+
+  control-plane/       ← platform-admin-only operations
+    routes.ts          ← /admin/* routes (guarded by requirePlatformAdmin)
+    service.ts         ← AdminService — tenant provisioning, user management, platform flags
+    container.ts       ← registerControlPlane(container)
+
+  modules/             ← opt-in feature modules
+    types.ts           ← ApiModule interface { name, container?, routes }
+    registry.ts        ← enabledModules[] — comment/uncomment to toggle
+    team/              ← member invitations, role management
+    billing/           ← Stripe subscriptions, plan management
+    api-keys/          ← HMAC API key issuance and revocation
+    webhooks/          ← webhook endpoints and delivery
+    feature-flags/     ← per-tenant flag overrides
+    audit-logs/        ← audit log querying and archival
+```
+
+### Module interface
+
+Every pluggable module exports an object that satisfies `ApiModule`:
+
+```typescript
+export interface ApiModule {
+  name:       string
+  container?: (container: Container) => void  // optional DI bindings
+  routes:     FastifyPluginAsync               // Fastify route plugin
+}
+```
+
+### Module registry
+
+`modules/registry.ts` is the single place where modules are enabled or disabled:
+
+```typescript
+export const enabledModules: ApiModule[] = [
+  teamModule,
+  billingModule,
+  apiKeysModule,
+  webhooksModule,
+  featureFlagsModule,
+  auditLogsModule,
+]
+```
+
+Comment out a line to remove a module's routes and DI bindings from the running app.
+
+### Container build order
+
+`container/index.ts` wires everything in three layers:
+
+```typescript
+const container = buildCoreContainer()   // 1. core services (Auth, Tenant, DB pools)
+registerControlPlane(container)           // 2. AdminService
+for (const mod of enabledModules) {
+  mod.container?.(container)             // 3. per-module services (Billing, ApiKey, …)
+}
+```
+
 ## Dependency injection
 
-We use Inversify with constructor injection. Services are bound in `container/index.ts` as singletons. Tokens are defined in `container/tokens.ts`.
+We use Inversify with constructor injection. Tokens are defined in `container/tokens.ts`.
 
 ```typescript
 // Defining a service
@@ -127,7 +225,7 @@ export class ApiKeyService {
   ) {}
 }
 
-// Binding it
+// Binding it (inside the module's container.ts)
 container.bind<ApiKeyService>(TOKENS.ApiKeyService).to(ApiKeyService).inSingletonScope()
 
 // Using it in a route

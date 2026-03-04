@@ -2,6 +2,12 @@ import type { Sql } from 'postgres'
 import type { Tenant, NewTenant, PatchTenant } from '../types.js'
 import { NotFoundError, ConflictError } from '../errors.js'
 
+export interface TenantAdminRow {
+  tenant:      Tenant
+  memberCount: number
+  planSlug:    string | null
+}
+
 export class TenantsRepository {
   constructor(private readonly sql: Sql) {}
 
@@ -76,6 +82,63 @@ export class TenantsRepository {
       LIMIT  ${opts.limit  ?? 50}
       OFFSET ${opts.offset ?? 0}
     `
+  }
+
+  async listForAdmin(opts: {
+    limit:   number
+    offset:  number
+    status?: string
+    search?: string
+  }): Promise<{ tenants: TenantAdminRow[]; total: number }> {
+    // postgres.camel transforms all column names to camelCase
+    type Row = {
+      id: string; slug: string; name: string; status: string; isolationMode: string
+      schemaName: string | null; settings: Record<string, unknown>; metadata: Record<string, unknown>
+      createdAt: Date; updatedAt: Date; deletedAt: Date | null
+      memberCount: string; planSlug: string | null; total: string
+    }
+
+    const rows = await this.sql<Row[]>`
+      SELECT
+        t.*,
+        COUNT(DISTINCT m.id)::text          AS member_count,
+        p.slug                              AS plan_slug,
+        COUNT(*) OVER ()::text              AS total
+      FROM   tenants t
+      LEFT   JOIN memberships   m ON m.tenant_id = t.id
+      LEFT   JOIN subscriptions s ON s.tenant_id = t.id
+      LEFT   JOIN plans         p ON p.id = s.plan_id
+      WHERE  t.deleted_at IS NULL
+        AND  ${opts.status ? this.sql`t.status = ${opts.status}` : this.sql`TRUE`}
+        AND  ${opts.search
+          ? this.sql`(t.name ILIKE ${'%' + opts.search + '%'} OR t.slug ILIKE ${'%' + opts.search + '%'})`
+          : this.sql`TRUE`}
+      GROUP  BY t.id, p.slug
+      ORDER  BY t.created_at DESC
+      LIMIT  ${opts.limit}
+      OFFSET ${opts.offset}
+    `
+
+    const total = rows[0] ? parseInt(rows[0].total, 10) : 0
+    const tenants: TenantAdminRow[] = rows.map((r: Row) => ({
+      tenant: {
+        id:            r.id,
+        slug:          r.slug,
+        name:          r.name,
+        status:        r.status as Tenant['status'],
+        isolationMode: r.isolationMode as Tenant['isolationMode'],
+        schemaName:    r.schemaName,
+        settings:      r.settings,
+        metadata:      r.metadata,
+        createdAt:     r.createdAt,
+        updatedAt:     r.updatedAt,
+        deletedAt:     r.deletedAt,
+      },
+      memberCount: parseInt(r.memberCount, 10),
+      planSlug:    r.planSlug,
+    }))
+
+    return { tenants, total }
   }
 }
 

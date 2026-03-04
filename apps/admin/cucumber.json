@@ -1,0 +1,14 @@
+{
+  "default": {
+    "requireModule": ["tsx/cjs"],
+    "require": [
+      "e2e/support/env-setup.ts",
+      "e2e/support/world.ts",
+      "e2e/support/hooks.ts",
+      "e2e/step-definitions/**/*.steps.ts"
+    ],
+    "paths": ["e2e/features"],
+    "format": ["@cucumber/pretty-formatter"],
+    "forceExit": true
+  }
+}

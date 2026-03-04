@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { createMockJwt } from '../fixtures/auth'
+import { setupAuth, createMockJwt } from '../fixtures/auth'
 import {
   mockTenantsList,
   mockCreateTenant,
@@ -8,21 +8,14 @@ import {
   MOCK_WORKSPACES,
 } from '../helpers/mock-api'
 
-/**
- * NOTE: workspace-picker reads auth status from Redux, but useAuth is only
- * called inside the dashboard layout (AuthGuard). So we navigate through
- * /auth/callback first to properly initialise the Redux auth state before
- * going to /workspace-picker.
- */
-
 async function goToWorkspacePicker(
   page: Page,
   workspaces: typeof MOCK_WORKSPACES | [] = [],
+  isPlatformAdmin = false,
 ) {
-  const token = createMockJwt({ tenantId: null, role: null })
+  await setupAuth(page, { tenantId: null, role: null, ipa: isPlatformAdmin })
   await mockTenantsList(page, workspaces)
-  await page.goto(`/auth/callback#token=${token}`)
-  await page.waitForURL('/workspace-picker', { timeout: 10_000 })
+  await page.goto('/workspace-picker')
 }
 
 test.describe('Workspace Picker', () => {
@@ -32,9 +25,19 @@ test.describe('Workspace Picker', () => {
     await expect(page.getByText('Select a workspace to continue')).toBeVisible()
   })
 
-  test('shows "Create a new workspace" button when no workspaces exist', async ({ page }) => {
-    await goToWorkspacePicker(page)
+  test('shows "Create a new workspace" button for platform admins', async ({ page }) => {
+    await goToWorkspacePicker(page, [], true)
     await expect(page.getByRole('button', { name: /create a new workspace/i })).toBeVisible()
+  })
+
+  test('does not show "Create a new workspace" button for regular users', async ({ page }) => {
+    await goToWorkspacePicker(page)
+    await expect(page.getByRole('button', { name: /create a new workspace/i })).not.toBeVisible()
+  })
+
+  test('shows empty-state message for non-admin with no workspaces', async ({ page }) => {
+    await goToWorkspacePicker(page)
+    await expect(page.getByText("You haven't been added to any workspace yet")).toBeVisible()
   })
 
   test('shows workspace list when multiple workspaces exist', async ({ page }) => {
@@ -64,8 +67,8 @@ test.describe('Workspace Picker', () => {
     await expect(page.getByText('Member')).toBeVisible()
   })
 
-  test('shows create workspace form when button clicked', async ({ page }) => {
-    await goToWorkspacePicker(page)
+  test('shows create workspace form when button clicked (platform admin)', async ({ page }) => {
+    await goToWorkspacePicker(page, [], true)
 
     await page.getByRole('button', { name: /create a new workspace/i }).click()
     await expect(page.getByText('New workspace', { exact: true })).toBeVisible()
@@ -76,14 +79,14 @@ test.describe('Workspace Picker', () => {
   })
 
   test('Create button is disabled when name is empty', async ({ page }) => {
-    await goToWorkspacePicker(page)
+    await goToWorkspacePicker(page, [], true)
 
     await page.getByRole('button', { name: /create a new workspace/i }).click()
     await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled()
   })
 
   test('Create button is enabled after entering workspace name', async ({ page }) => {
-    await goToWorkspacePicker(page)
+    await goToWorkspacePicker(page, [], true)
 
     await page.getByRole('button', { name: /create a new workspace/i }).click()
     await page.getByLabel('Name').fill('My New Workspace')
@@ -91,7 +94,7 @@ test.describe('Workspace Picker', () => {
   })
 
   test('Cancel hides the create form', async ({ page }) => {
-    await goToWorkspacePicker(page)
+    await goToWorkspacePicker(page, [], true)
 
     await page.getByRole('button', { name: /create a new workspace/i }).click()
     await expect(page.getByText('New workspace', { exact: true })).toBeVisible()
@@ -99,9 +102,9 @@ test.describe('Workspace Picker', () => {
     await expect(page.getByText('New workspace', { exact: true })).not.toBeVisible()
   })
 
-  test('creating a workspace calls POST /tenants and POST /auth/workspace', async ({ page }) => {
+  test('creating a workspace calls POST /admin/tenants and POST /auth/workspace', async ({ page }) => {
     const selectToken = createMockJwt({ tenantId: 'tenant-new' })
-    await goToWorkspacePicker(page)
+    await goToWorkspacePicker(page, [], true)
     await mockCreateTenant(page)
     await mockSelectWorkspace(page, selectToken)
 
@@ -110,7 +113,7 @@ test.describe('Workspace Picker', () => {
 
     const [createReq, selectReq] = await Promise.all([
       page.waitForRequest(
-        req => req.method() === 'POST' && req.url().endsWith('/tenants'),
+        req => req.method() === 'POST' && req.url().endsWith('/admin/tenants'),
         { timeout: 8_000 },
       ),
       page.waitForRequest(

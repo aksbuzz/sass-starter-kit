@@ -1,6 +1,5 @@
-import type { Page, BrowserContext } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
-const SESSION_STORAGE_KEY = 'saas_access_token'
 const SESSION_COOKIE_NAME = 'saas_session'
 const API_URL = 'http://localhost:3001'
 
@@ -9,6 +8,7 @@ export interface MockJwtOptions {
   sessionId?: string
   tenantId?: string | null
   role?: 'owner' | 'admin' | 'member' | null
+  ipa?: boolean
   expiresInSeconds?: number
 }
 
@@ -22,6 +22,7 @@ export function createMockJwt(options: MockJwtOptions = {}): string {
     sessionId = 'session-test-123',
     tenantId = 'tenant-test-123',
     role = 'owner',
+    ipa = false,
     expiresInSeconds = 3600,
   } = options
 
@@ -33,6 +34,7 @@ export function createMockJwt(options: MockJwtOptions = {}): string {
     sid: sessionId,
     tid: tenantId,
     role,
+    ...(ipa ? { ipa: true } : {}),
     exp: Math.floor(Date.now() / 1000) + expiresInSeconds,
     iat: Math.floor(Date.now() / 1000),
   }
@@ -48,15 +50,17 @@ export function createMockJwt(options: MockJwtOptions = {}): string {
 
 /**
  * Sets up an authenticated browser context by:
- * 1. Adding the saas_session cookie (passes middleware check)
- * 2. Injecting a valid JWT into sessionStorage via addInitScript
- *    (picked up by useAuth on mount)
+ * 1. Mocking POST /auth/refresh to return the mock token (picked up by useAuth on mount)
+ * 2. Adding the saas_session cookie (presence indicator)
  */
 export async function setupAuth(
   page: Page,
   options: MockJwtOptions = {},
 ): Promise<string> {
   const token = createMockJwt(options)
+
+  // Mock the refresh endpoint BEFORE any navigation so useAuth() resolves immediately
+  await mockRefreshEndpoint(page, token)
 
   await page.context().addCookies([
     {
@@ -67,13 +71,6 @@ export async function setupAuth(
       expires: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60,
     },
   ])
-
-  await page.addInitScript(
-    ({ key, token: t }) => {
-      sessionStorage.setItem(key, t)
-    },
-    { key: SESSION_STORAGE_KEY, token },
-  )
 
   return token
 }

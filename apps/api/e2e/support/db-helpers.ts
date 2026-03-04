@@ -69,11 +69,18 @@ export function makeAccessToken(
   sessionId: string,
   tenantId:  string | null = null,
   role:      MemberRole  | null = null,
+  ipa:       boolean = false,
 ): string {
   return app.jwt.sign(
-    { purpose: 'access', sub: userId, sid: sessionId, tid: tenantId, role },
+    { purpose: 'access', sub: userId, sid: sessionId, tid: tenantId, role, ...(ipa ? { ipa: true } : {}) },
     { expiresIn: '15m' },
   )
+}
+
+export async function setUserPlatformAdmin(userId: string, value: boolean): Promise<void> {
+  await adminSql`
+    UPDATE users SET is_platform_admin = ${value} WHERE id = ${userId}
+  `
 }
 
 export function makeRefreshToken(

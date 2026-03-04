@@ -6,10 +6,14 @@ export default defineConfig({
     setupFiles: ['reflect-metadata'],
     include:  ['src/**/*.test.ts'],
     pool:     'forks',
+    passWithNoTests: true,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['src/services/**/*.ts', 'src/worker/job-worker.ts'],
+      include: [
+        'src/core/**/*.ts',
+        'src/modules/**/*.ts',
+      ],
     },
   },
 })

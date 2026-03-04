@@ -62,6 +62,14 @@ export class MembershipsRepository {
     return parseInt(row!.count, 10)
   }
 
+  async countForTenant(tenantId: string): Promise<number> {
+    const [row] = await this.sql<[{ count: string }]>`
+      SELECT COUNT(*) AS count FROM memberships
+      WHERE  tenant_id = ${tenantId}::uuid AND status = 'active'
+    `
+    return parseInt(row!.count, 10)
+  }
+
   async countByRoleForUpdate(role: MemberRole): Promise<number> {
     const [row] = await this.sql<[{ count: string }]>`
       SELECT COUNT(*) AS count FROM (

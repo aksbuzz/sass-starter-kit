@@ -76,11 +76,34 @@ services:
       retries: 5
       start_period: 20s
 
+  # ── Admin control-plane API ────────────────────────────────────────────────
+  admin:
+    build:
+      context: .
+      dockerfile: docker/admin/Dockerfile
+    container_name: saas_admin
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "3002:3002"
+    env_file: .env.docker
+    environment:
+      DATABASE_URL:     "postgresql://saas_admin:saas_password@postgres:5432/saas_dev?sslmode=disable"
+      DATABASE_APP_URL: "postgresql://app_user:app_user_password@postgres:5432/saas_dev?sslmode=disable"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   # ── Job worker ─────────────────────────────────────────────────────────────
   worker:
     build:
       context: .
-      dockerfile: docker/api/Dockerfile
+      dockerfile: docker/worker/Dockerfile
     container_name: saas_worker
     restart: unless-stopped
     depends_on:
@@ -92,7 +115,6 @@ services:
     environment:
       DATABASE_URL:     "postgresql://saas_admin:saas_password@postgres:5432/saas_dev?sslmode=disable"
       DATABASE_APP_URL: "postgresql://app_user:app_user_password@postgres:5432/saas_dev?sslmode=disable"
-    command: ["pnpm", "--filter", "@saas/api", "run", "worker:start"]
 
   # ── Vite web app ───────────────────────────────────────────────────────────
   web:
@@ -101,6 +123,7 @@ services:
       dockerfile: docker/web/Dockerfile
       args:
         VITE_API_URL:                http://localhost:3001
+        VITE_ADMIN_API_URL:          http://localhost:3002
         VITE_WEB_URL:                http://localhost:3000
         VITE_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder
     container_name: saas_web

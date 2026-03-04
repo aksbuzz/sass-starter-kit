@@ -2,6 +2,11 @@ import type { Sql } from 'postgres'
 import type { User, NewUser, PatchUser } from '../types.js'
 import { NotFoundError } from '../errors.js'
 
+export interface UserAdminRow {
+  user:           User
+  workspaceCount: number
+}
+
 export class UsersRepository {
   constructor(private readonly sql: Sql) {}
 
@@ -76,5 +81,54 @@ export class UsersRepository {
          SET deleted_at = NOW(), updated_at = NOW()
        WHERE id = ${id} AND deleted_at IS NULL
     `
+  }
+
+  async listForAdmin(opts: {
+    limit:   number
+    offset:  number
+    search?: string
+  }): Promise<{ users: UserAdminRow[]; total: number }> {
+    // postgres.camel transforms all column names to camelCase
+    type Row = {
+      id: string; email: string; name: string | null; avatarUrl: string | null
+      emailVerified: boolean; isPlatformAdmin: boolean
+      createdAt: Date; updatedAt: Date; deletedAt: Date | null
+      workspaceCount: string; total: string
+    }
+
+    const rows = await this.sql<Row[]>`
+      SELECT
+        u.*,
+        COUNT(DISTINCT m.tenant_id)::text  AS workspace_count,
+        COUNT(*) OVER ()::text             AS total
+      FROM   users u
+      LEFT   JOIN memberships m ON m.user_id = u.id
+      WHERE  u.deleted_at IS NULL
+        AND  ${opts.search
+          ? this.sql`(u.email ILIKE ${'%' + opts.search + '%'} OR u.name ILIKE ${'%' + opts.search + '%'})`
+          : this.sql`TRUE`}
+      GROUP  BY u.id
+      ORDER  BY u.created_at DESC
+      LIMIT  ${opts.limit}
+      OFFSET ${opts.offset}
+    `
+
+    const total = rows[0] ? parseInt(rows[0].total, 10) : 0
+    const users: UserAdminRow[] = rows.map((r: Row) => ({
+      user: {
+        id:              r.id,
+        email:           r.email,
+        name:            r.name,
+        avatarUrl:       r.avatarUrl,
+        emailVerified:   r.emailVerified,
+        isPlatformAdmin: r.isPlatformAdmin,
+        createdAt:       r.createdAt,
+        updatedAt:       r.updatedAt,
+        deletedAt:       r.deletedAt,
+      },
+      workspaceCount: parseInt(r.workspaceCount, 10),
+    }))
+
+    return { users, total }
   }
 }

@@ -38,6 +38,7 @@ logs/
 # Test coverage
 coverage/
 .nyc_output/
+playwright-report
 
 # Terraform
 infrastructure/terraform/.terraform/

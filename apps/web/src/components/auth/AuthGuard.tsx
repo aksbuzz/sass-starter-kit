@@ -11,10 +11,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (auth.status === 'unauthenticated') {
       navigate({ to: ROUTES.login, replace: true });
     }
-    if (auth.status === 'authenticated' && !auth.tenantId) {
+    // Platform admins don't select workspaces — send them to admin panel
+    if (auth.status === 'authenticated' && !auth.tenantId && !auth.isPlatformAdmin) {
       navigate({ to: ROUTES.workspacePicker, replace: true });
     }
-  }, [auth.status, auth.tenantId, navigate])
+  }, [auth.status, auth.tenantId, auth.isPlatformAdmin, navigate])
 
   if (auth.status === 'idle' || auth.status === 'loading') {
     return (
@@ -24,7 +25,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (auth.status !== 'authenticated' || !auth.tenantId) return null
+  if (auth.status !== 'authenticated') return null
+  if (!auth.tenantId && !auth.isPlatformAdmin) return null
 
   return <>{children}</>
 }

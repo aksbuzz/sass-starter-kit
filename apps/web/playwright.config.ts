@@ -25,6 +25,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       VITE_API_URL:                'http://localhost:3001',
+      VITE_ADMIN_API_URL:          'http://localhost:3002',
       VITE_WEB_URL:                'http://localhost:3000',
       VITE_STRIPE_PUBLISHABLE_KEY: 'pk_test_placeholder',
     },

@@ -21,9 +21,11 @@ COPY packages/config/src ./packages/config/src
 COPY packages/ui/src     ./packages/ui/src
 COPY apps/web            ./apps/web
 ARG VITE_API_URL=http://localhost:3001
+ARG VITE_ADMIN_API_URL=http://localhost:3002
 ARG VITE_WEB_URL=http://localhost:3000
 ARG VITE_STRIPE_PUBLISHABLE_KEY=pk_test_placeholder
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_ADMIN_API_URL=$VITE_ADMIN_API_URL
 ENV VITE_WEB_URL=$VITE_WEB_URL
 ENV VITE_STRIPE_PUBLISHABLE_KEY=$VITE_STRIPE_PUBLISHABLE_KEY
 RUN pnpm --filter @saas/web build

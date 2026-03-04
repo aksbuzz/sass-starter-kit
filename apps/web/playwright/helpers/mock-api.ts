@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test'
 
-const API_URL = 'http://localhost:3001'
+const API_URL       = 'http://localhost:3001'
+const ADMIN_API_URL = 'http://localhost:3002'
 
 // ── Shared mock data ─────────────────────────────────────────────────────────
 
@@ -154,17 +155,18 @@ export async function mockTenantsList(page: Page, workspaces = MOCK_WORKSPACES) 
   await mockRoute(page, '/tenants', { body: { workspaces } })
 }
 
-/** Mock POST /tenants → create tenant */
+/** Mock POST /admin/tenants → create tenant (platform admin only).
+ *  Uses regex to match regardless of ADMIN_API_URL port. */
 export async function mockCreateTenant(page: Page) {
-  await page.route(`${API_URL}/tenants`, async (route) => {
+  await page.route(/\/admin\/tenants$/, async (route) => {
     if (route.request().method() === 'POST') {
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
-        body: JSON.stringify({ tenant: MOCK_TENANT, membership: MOCK_MEMBERSHIP }),
+        body: JSON.stringify({ tenant: MOCK_TENANT, invitationToken: null }),
       })
     } else {
-      await route.continue()
+      await route.fulfill({ status: 204 })
     }
   })
 }
@@ -206,11 +208,10 @@ export async function mockAuditLogs(page: Page, logs = [MOCK_AUDIT_LOG]) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        logs,
-        total: logs.length,
-        page: 1,
-        perPage: 20,
-        totalPages: 1,
+        rows:   logs,
+        total:  logs.length,
+        limit:  20,
+        offset: 0,
       }),
     })
   })

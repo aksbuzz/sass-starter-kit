@@ -13,6 +13,10 @@ export class ApiError extends Error {
   }
 }
 
+function baseUrlForPath(path: string): string {
+  return path.startsWith('/admin') ? clientEnv.ADMIN_API_URL : clientEnv.API_URL
+}
+
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -36,7 +40,7 @@ async function apiFetch<T>(
 
   let res: Response
   try {
-    res = await fetch(`${clientEnv.API_URL}${path}`, {
+    res = await fetch(`${baseUrlForPath(path)}${path}`, {
       ...options,
       credentials: 'include',
       headers,
